@@ -300,3 +300,80 @@ SELECT
 FROM classified
 GROUP BY year, do_bod_class
 ORDER BY year, do_bod_class;
+
+-- Query 7d-1: Compare non-A-C share in 2022
+-- Panel groups: 6-year stations vs stations monitored for <6 years
+
+WITH classified AS (
+    SELECT
+        f.stn_code,
+        f.year,
+        CASE
+            WHEN d.years_monitored = 6 THEN '6-year stations'
+            WHEN d.years_monitored < 6 THEN 'Under-6-year stations'
+        END AS panel_group,
+        CASE
+            WHEN f.do_mg_l_min IS NULL
+              OR f.bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+            WHEN f.do_mg_l_min >= 6
+             AND f.bod_mg_l_max <= 2
+                THEN 'A'
+            WHEN f.do_mg_l_min >= 5
+             AND f.bod_mg_l_max <= 3
+                THEN 'B'
+            WHEN f.do_mg_l_min >= 4
+             AND f.bod_mg_l_max <= 3
+                THEN 'C'
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality f
+    JOIN dim_station d
+        ON f.stn_code = d.stn_code
+    WHERE f.year = 2022
+      AND d.years_monitored IS NOT NULL
+      AND d.years_monitored <= 6
+)
+SELECT
+    panel_group,
+    COUNT(*) AS total_records,
+    SUM(
+        CASE
+            WHEN do_bod_class = 'Below C' THEN 1
+            ELSE 0
+        END
+    ) AS non_ac_records,
+    ROUND(
+        100.0 * SUM(
+            CASE
+                WHEN do_bod_class = 'Below C' THEN 1
+                ELSE 0
+            END
+        ) / COUNT(*),
+        1
+    ) AS non_ac_pct
+FROM classified
+WHERE panel_group IS NOT NULL
+  AND do_bod_class <> 'Insufficient data'
+GROUP BY panel_group
+ORDER BY non_ac_pct DESC;
+
+-- Query 7d-2: State-wise count of stations monitored for all 6 years
+
+SELECT
+    state,
+    COUNT(DISTINCT stn_code) AS station_count
+FROM dim_station
+WHERE years_monitored = 6
+GROUP BY state
+ORDER BY station_count DESC, state
+LIMIT 3;
+
+-- Q7e: stations added after 2017, by state
+SELECT state,
+       COUNT(*) AS total_stations,
+       SUM(CASE WHEN first_year > 2017 THEN 1 ELSE 0 END) AS added_after_2017
+FROM dim_station
+GROUP BY state
+ORDER BY added_after_2017 DESC
+LIMIT 5;
