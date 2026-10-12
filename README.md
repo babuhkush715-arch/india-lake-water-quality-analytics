@@ -30,3 +30,5 @@ Raw CSV -> Python ETL (cleaning + validation) -> SQLite -> SQL analysis -> Power
 - Maharashtra has no stations in this dataset.
 - Data is annual min/max per station, not a time series.
 - No GPS coordinates, so maps are state-level.
+
+“On DO/BOD alone (worst-case annual values), the share of station-years not meeting CPCB Class A-C fell from about 70% (2017) to about 63% (2022) in a fixed panel of 321 stations monitored every year, but looked flat (67-73%) across the whole network. In 2022, stations monitored for fewer than 6 years had a higher share (77%) than the 6-year panel (63%), so network expansion hides the improvement. The panel is Karnataka-heavy (87 of 321 stations). No causal claim and no formal significance testing; classification uses DO and BOD only.”
