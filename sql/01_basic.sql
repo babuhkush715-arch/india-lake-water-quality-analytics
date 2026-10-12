@@ -377,3 +377,273 @@ FROM dim_station
 GROUP BY state
 ORDER BY added_after_2017 DESC
 LIMIT 5;
+
+-- BDL entries
+SELECT parameter, COUNT(*) AS bdl_records
+FROM dq_issues
+WHERE issue = 'below_detection_limit'
+GROUP BY parameter
+ORDER BY bdl_records DESC;
+
+-- Query 8: Full A-C screening using DO, BOD, pH and total coliform
+-- Source: CPCB, Designated Best Use Water Quality Criteria
+-- https://cpcb.nic.in/wqm/Designated_Best_Use_Water_Quality_Criteria.pdf
+-- Note: NULL/BDL values are not automatically treated as clean water.
+
+WITH do_bod AS (
+    SELECT
+        stn_code,
+        year,
+        do_mg_l_min,
+        bod_mg_l_max,
+        ph_min,
+        ph_max,
+        total_coliform_mpn_max,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2 THEN 'A'
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3 THEN 'B'
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3 THEN 'C'
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality
+    WHERE year BETWEEN 2017 AND 2022
+),
+classified AS (
+    SELECT *,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+              OR ph_min IS NULL
+              OR ph_max IS NULL
+              OR total_coliform_mpn_max IS NULL
+                THEN 'Insufficient data'
+
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+             AND ph_min >= 6.5 AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 50
+                THEN 'A'
+
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.5 AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 500
+                THEN 'B'
+
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.0 AND ph_max <= 9.0
+             AND total_coliform_mpn_max <= 5000
+                THEN 'C'
+
+            ELSE 'Below C'
+        END AS full_class
+    FROM do_bod
+)
+SELECT
+    year,
+    COUNT(DISTINCT stn_code) AS station_count,
+    COUNT(*) AS total_records,
+
+    SUM(CASE WHEN do_bod_class IN ('A','B','C')
+             THEN 1 ELSE 0 END) AS do_bod_ac_records,
+
+    SUM(CASE WHEN full_class IN ('A','B','C')
+             THEN 1 ELSE 0 END) AS full_ac_records,
+
+    SUM(CASE WHEN do_bod_class IN ('A','B','C')
+              AND full_class = 'Below C'
+             THEN 1 ELSE 0 END) AS downgraded_records,
+
+    SUM(CASE WHEN do_bod_class IN ('A','B','C')
+              AND full_class = 'Insufficient data'
+             THEN 1 ELSE 0 END) AS insufficient_after_screening
+
+FROM classified
+GROUP BY year
+ORDER BY year;
+
+-- Q8b: Class transition table for 2022
+-- Compare DO/BOD class with full screening (DO, BOD, pH, coliform)
+-- Source: CPCB Designated Best Use Water Quality Criteria
+-- Note: BDL/NULL values are not automatically treated as clean water.
+
+WITH do_bod AS (
+    SELECT
+        stn_code,
+        year,
+        do_mg_l_min,
+        bod_mg_l_max,
+        ph_min,
+        ph_max,
+        total_coliform_mpn_max,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+                THEN 'A'
+
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+                THEN 'B'
+
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+                THEN 'C'
+
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality
+    WHERE year BETWEEN 2017 AND 2022
+),
+classified AS (
+    SELECT
+        *,
+        CASE
+            -- If DO/BOD already fails, retain Below C
+            WHEN do_bod_class = 'Below C'
+                THEN 'Below C'
+
+            -- Missing data matters for records that pass DO/BOD
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+              OR ph_min IS NULL
+              OR ph_max IS NULL
+              OR total_coliform_mpn_max IS NULL
+                THEN 'Insufficient data'
+
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+             AND ph_min >= 6.5
+             AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 50
+                THEN 'A'
+
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.5
+             AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 500
+                THEN 'B'
+
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.0
+             AND ph_max <= 9.0
+             AND total_coliform_mpn_max <= 5000
+                THEN 'C'
+
+            ELSE 'Below C'
+        END AS full_class
+    FROM do_bod
+)
+SELECT
+    do_bod_class,
+    full_class,
+    COUNT(*) AS records
+FROM classified
+WHERE year = 2022
+GROUP BY
+    do_bod_class,
+    full_class
+ORDER BY
+    do_bod_class,
+    full_class;
+
+-- Q8c Robustness check: Fixed 6-year panel excluding Karnataka
+-- Lower bound: confirmed A/B/C records
+-- Upper bound: A/B/C + insufficient-data records
+
+WITH do_bod AS (
+    SELECT
+        stn_code,
+        year,
+        do_mg_l_min,
+        bod_mg_l_max,
+        ph_min,
+        ph_max,
+        total_coliform_mpn_max,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2 THEN 'A'
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3 THEN 'B'
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3 THEN 'C'
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality
+    WHERE year BETWEEN 2017 AND 2022
+      AND stn_code IN (
+          SELECT stn_code
+          FROM dim_station
+          WHERE years_monitored = 6
+            AND UPPER(TRIM(state)) <> 'KARNATAKA'
+      )
+),
+classified AS (
+    SELECT
+        *,
+        CASE
+            WHEN do_bod_class = 'Below C'
+                THEN 'Below C'
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+              OR ph_min IS NULL
+              OR ph_max IS NULL
+              OR total_coliform_mpn_max IS NULL
+                THEN 'Insufficient data'
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+             AND ph_min >= 6.5 AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 50
+                THEN 'A'
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.5 AND ph_max <= 8.5
+             AND total_coliform_mpn_max <= 500
+                THEN 'B'
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+             AND ph_min >= 6.0 AND ph_max <= 9.0
+             AND total_coliform_mpn_max <= 5000
+                THEN 'C'
+            ELSE 'Below C'
+        END AS full_class
+    FROM do_bod
+)
+SELECT
+    year,
+    COUNT(*) AS total_records,
+    SUM(CASE
+        WHEN full_class IN ('A', 'B', 'C') THEN 1
+        ELSE 0
+    END) AS full_ac_records,
+    ROUND(
+        100.0 * SUM(CASE
+            WHEN full_class IN ('A', 'B', 'C') THEN 1
+            ELSE 0
+        END) / COUNT(*), 1
+    ) AS full_ac_pct_lower,
+    ROUND(
+        100.0 * SUM(CASE
+            WHEN full_class IN ('A', 'B', 'C', 'Insufficient data')
+                THEN 1
+            ELSE 0
+        END) / COUNT(*), 1
+    ) AS full_ac_pct_upper
+FROM classified
+GROUP BY year
+ORDER BY year;

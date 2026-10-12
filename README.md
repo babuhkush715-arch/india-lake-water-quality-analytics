@@ -13,14 +13,14 @@ Raw CSV -> Python ETL (cleaning + validation) -> SQLite -> SQL analysis -> Power
 ## Status
 - [x] ETL and data quality checks
 - [x] SQL analysis part 1: counts, rankings, outlier checks, DO/BOD class screening (Q1-Q7)
-- [ ] Full CPCB A-C screening (adds pH and total coliform)
+- [x] SQL analysis: counts, rankings, outlier checks, CPCB A-C class screening (Q1-Q8)
 - [ ] Power BI dashboard
 
 ## Findings so far
 - 699 stations across 31 states/UTs; Karnataka (171) and Telangana (160) make up about half.
 - The monitoring network grew from 373 stations (2017) to 639 (2022). Only 321 stations have data for all 6 years, so year-on-year comparisons use percentages, not raw counts.
 - The 10 stations with the highest fecal coliform maxima are all in Karnataka.
-- On DO/BOD alone (worst-case annual values), the share of station-years not meeting CPCB Class A-C fell from about 70% (2017) to about 63% (2022) in a fixed panel of 321 stations monitored every year, but looked flat (67-73%) across the whole network. In 2022, stations monitored for fewer than 6 years had a higher share (77%) than the 6-year panel (63%), which may explain why the network-wide share looks flat. The panel is Karnataka-heavy (87 of 321 stations). No causal claim and no formal significance testing.
+- Applying the full CPCB Class A-C criteria (DO, BOD, pH, total coliform) in a fixed panel of 321 stations monitored every year, the share of station-years meeting them rose from 22-25% (2017) to 32-35% (2022), with a dip in 2018. The range reflects station-years where pH or coliform is missing. In 2022, 8 of 639 station-years (1.3%) met full Class A criteria, versus 31 (4.9%) on DO/BOD alone. Panel is Karnataka-heavy; no significance testing; causes not analysed.
 
 ## Data quality notes
 - 40 junk header rows removed during ETL.
@@ -33,7 +33,7 @@ Raw CSV -> Python ETL (cleaning + validation) -> SQLite -> SQL analysis -> Power
 - Maharashtra has no stations in this dataset.
 - Data is annual min/max per station, not a time series.
 - No GPS coordinates, so maps will be state-level.
-- Class screening so far uses DO and BOD only (not the full CPCB classification); BDL values treated as missing may affect class shares slightly.
+- Class screening covers Classes A-C only (DO, BOD, pH, total coliform); Classes D and E (ammonia, conductivity, SAR) are not assessed. Worst-case annual values are used (minimum DO, maximum BOD and coliform), and BDL values are treated as missing.
 
 ## How to run
 1. `pip install -r requirements.txt`
