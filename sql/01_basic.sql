@@ -178,3 +178,125 @@ JOIN dim_station d
 WHERE y.prev_year_value >= 1000
   AND y.fecal_coliform_mpn_max > y.prev_year_value * 100
 ORDER BY spike_ratio DESC;
+
+-- Query 7a: DO/BOD-based water quality screening per station-year
+-- Source: CPCB, Designated Best Use Water Quality Criteria
+-- https://cpcb.nic.in/wqm/Designated_Best_Use_Water_Quality_Criteria.pdf
+-- Thresholds checked on: 2026-10-12
+-- Note: Screening based only on DO and BOD, not full CPCB classification.
+
+SELECT
+    stn_code,
+    year,
+    do_mg_l_min,
+    bod_mg_l_max,
+    CASE
+        WHEN do_mg_l_min IS NULL
+          OR bod_mg_l_max IS NULL
+            THEN 'Insufficient data'
+
+        WHEN do_mg_l_min >= 6
+         AND bod_mg_l_max <= 2
+            THEN 'A'
+
+        WHEN do_mg_l_min >= 5
+         AND bod_mg_l_max <= 3
+            THEN 'B'
+
+        WHEN do_mg_l_min >= 4
+         AND bod_mg_l_max <= 3
+            THEN 'C'
+
+        ELSE 'Below C'
+    END AS wq_class
+FROM fact_lake_quality;
+
+-- Q7b: Share of each DO/BOD class per year (%)
+
+WITH classified AS (
+    SELECT
+        stn_code,
+        year,
+        do_mg_l_min,
+        bod_mg_l_max,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+                THEN 'A'
+
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+                THEN 'B'
+
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+                THEN 'C'
+
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality
+)
+SELECT
+    year,
+    do_bod_class,
+    COUNT(*) AS stations,
+    ROUND(
+        100.0 * COUNT(*)
+        / SUM(COUNT(*)) OVER (PARTITION BY year),
+        1
+    ) AS pct
+FROM classified
+GROUP BY year, do_bod_class
+ORDER BY year, do_bod_class;
+
+-- Q7c: Year-wise DO/BOD class percentage
+-- Only stations monitored for all 6 years (2017-2022)
+
+WITH classified AS (
+    SELECT
+        stn_code,
+        year,
+        do_mg_l_min,
+        bod_mg_l_max,
+        CASE
+            WHEN do_mg_l_min IS NULL
+              OR bod_mg_l_max IS NULL
+                THEN 'Insufficient data'
+
+            WHEN do_mg_l_min >= 6
+             AND bod_mg_l_max <= 2
+                THEN 'A'
+
+            WHEN do_mg_l_min >= 5
+             AND bod_mg_l_max <= 3
+                THEN 'B'
+
+            WHEN do_mg_l_min >= 4
+             AND bod_mg_l_max <= 3
+                THEN 'C'
+
+            ELSE 'Below C'
+        END AS do_bod_class
+    FROM fact_lake_quality
+    WHERE stn_code IN (
+        SELECT stn_code
+        FROM dim_station
+        WHERE years_monitored = 6
+    )
+)
+SELECT
+    year,
+    do_bod_class,
+    COUNT(*) AS stations,
+    ROUND(
+        100.0 * COUNT(*)
+        / SUM(COUNT(*)) OVER (PARTITION BY year),
+        1
+    ) AS pct
+FROM classified
+GROUP BY year, do_bod_class
+ORDER BY year, do_bod_class;
