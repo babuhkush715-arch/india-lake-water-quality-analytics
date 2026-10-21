@@ -4,3 +4,5 @@ __pycache__/
 .ipynb_checkpoints/
 data/lakes.db
 data/raw/
+data/clean/
+data/export/
